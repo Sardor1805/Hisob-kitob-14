@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OmborPro — Boshqaruv tizimi</title>
   <style>
-    /* ==================== RESET & TOKENS ==================== */
+    /* ==================== RESET & TOKENS (DARK MODE) ==================== */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root {
       --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --muted: #94a3b8;
@@ -382,20 +382,34 @@
 
   <script>
     /* ================================================================
-       OmborPro — to'liq JavaScript (Supabase bilan)
+       OmborPro — to'liq JavaScript (Supabase va mahalliy vaqt bilan)
        ================================================================ */
 
-    /* ================== SUPABASE ULANISHI ================== */
     // ⬇️ BU YERGA O'Z KALITLARINGIZNI QO'YING:
-    const SUPABASE_URL = 'https://lwiqfnmpcdovcpqqawqf.supabase.co';
+     const SUPABASE_URL = 'https://lwiqfnmpcdovcpqqawqf.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3aXFmbm1wY2RvdmNwcXFhd3FmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwMjg5NjEsImV4cCI6MjEwODYwNDk2MX0.XTeywg8R3nF3SpyqJeSCPtC7NTYhv2tU4Yd2JxPqLD4';
 
-    // Diqqat: o'zgaruvchi nomi 'db' (supabase bilan to'qnashmasin!)
+   
+
+    // Diqqat: o'zgaruvchi nomi 'db' (supabase bilan to'qnashmasligi uchun!)
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     /* ================== UTILS ================== */
     const fmt = n => new Intl.NumberFormat('uz-UZ').format(Math.round(Number(n) || 0));
-    const todayKey = () => new Date().toISOString().slice(0, 10);
+    
+    // Mahalliy vaqtni olish (YYYY-MM-DD)
+    const todayKey = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    // Server vaqtini (UTC) mahalliy sanaga o'girish (YYYY-MM-DD)
+    function getLocalDateStr(dateStr) {
+      if (!dateStr) return todayKey();
+      const d = new Date(dateStr);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     const esc = s => String(s ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
     /* ================== GLOBAL STATE ================== */
@@ -481,7 +495,8 @@
         product_id: p.id, model: p.model, quantity, price: finalPrice,
         total_revenue: totalRevenue, total_cost: p.costPrice * quantity,
         profit: (finalPrice - p.costPrice) * quantity,
-        customer_id: customerId || null, paid_amount: paid, debt_amount: debt
+        customer_id: customerId || null, paid_amount: paid, debt_amount: debt,
+        date: todayKey()
       }]);
 
       await db.from('products').update({ quantity: p.quantity - quantity, updated_at: new Date() }).eq('id', p.id);
@@ -502,12 +517,12 @@
     }
 
     async function addService(desc, price) {
-      await db.from('services').insert([{ description: desc, price }]);
+      await db.from('services').insert([{ description: desc, price, date: todayKey() }]);
       await loadData();
     }
 
     async function addExpense(desc, amount) {
-      await db.from('expenses').insert([{ description: desc, amount }]);
+      await db.from('expenses').insert([{ description: desc, amount, date: todayKey() }]);
       await loadData();
     }
 
@@ -528,20 +543,25 @@
 
     /* ================== STATISTIKA HISOBLASH ================== */
     function getDayStats(dateStr) {
-      const dSales = sales.filter(s => s.date === dateStr && !s.isReturned);
-      const dServices = services.filter(s => s.date === dateStr);
-      const dExpenses = expenses.filter(e => e.date === dateStr);
+      // server UTC vaqtini mahalliy vaqtga o'girib solishtiramiz
+      const dSales = sales.filter(s => getLocalDateStr(s.created_at) === dateStr && !s.isReturned);
+      const dServices = services.filter(s => getLocalDateStr(s.created_at) === dateStr);
+      const dExpenses = expenses.filter(e => getLocalDateStr(e.created_at) === dateStr);
+      
       const revenue = dSales.reduce((a, s) => a + Number(s.totalRevenue || 0), 0) + dServices.reduce((a, s) => a + Number(s.price || 0), 0);
       const cogs = dSales.reduce((a, s) => a + Number(s.totalCost || 0), 0);
       const cashOut = dExpenses.reduce((a, e) => a + Number(e.amount || 0), 0);
+      
       return { income: revenue, expense: cogs + cashOut, profit: revenue - cogs - cashOut };
     }
 
     function getLastNDays(n) {
-      const out = []; const today = new Date();
+      const out = []; 
+      const today = new Date();
       for (let i = n - 1; i >= 0; i--) {
-        const d = new Date(today); d.setDate(d.getDate() - i);
-        const k = d.toISOString().slice(0, 10);
+        const d = new Date(today); 
+        d.setDate(d.getDate() - i);
+        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         out.push({ date: k, ...getDayStats(k) });
       }
       return out;
@@ -714,7 +734,6 @@
           if (!newName) return alert('Tur nomini kiriting');
           const old = markups.find(m => m.id === id);
           if (old && old.name !== newName) {
-            // Mahsulotlardagi turi ham yangilansin
             for (const p of products) {
               if (p.type === old.name) {
                 await db.from('products').update({ type: newName }).eq('id', p.id);
@@ -805,15 +824,19 @@
         return;
       }
 
-      tbody.innerHTML = hist.slice(0, 100).map(h => `
+      tbody.innerHTML = hist.slice(0, 100).map(h => {
+        const d = new Date(h.date);
+        const timeStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        
+        return `
         <tr style="${h.isReturned ? 'opacity:0.5;' : ''}">
-          <td>${new Date(h.date).toLocaleString('uz-UZ')}</td>
+          <td>${timeStr}</td>
           <td style="color:${h.color}; font-weight:600;">${h.type}</td>
           <td>${esc(h.desc)}</td>
           <td style="color:${h.color};">${h.val}</td>
           <td>${h.isSale && !h.isReturned ? `<button class="btn-danger" onclick="returnSale('${h.id}')">Qaytarish</button>` : ''}</td>
         </tr>
-      `).join('');
+      `}).join('');
     }
 
     function renderStatistics() {
@@ -984,7 +1007,7 @@
         const cur = new Date(from);
         const end = new Date(to);
         while (cur <= end) {
-          const k = cur.toISOString().slice(0, 10);
+          const k = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
           const s = getDayStats(k);
           days.push([k, s.income, s.expense, s.profit]);
           cur.setDate(cur.getDate() + 1);
@@ -1005,8 +1028,9 @@
         const t = new Date();
         const w = new Date(t);
         w.setDate(t.getDate() - 7);
-        from.value = w.toISOString().slice(0, 10);
-        to.value = t.toISOString().slice(0, 10);
+        const formatLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        from.value = formatLocal(w);
+        to.value = formatLocal(t);
       }
     });
   </script>
